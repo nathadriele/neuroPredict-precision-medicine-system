@@ -16,7 +16,7 @@ NeuroPredict is an AI-driven precision medicine system that integrates clinical,
 - RAG with LLMs: Retrieval-augmented generation system for evidence-based recommendations
 - MLOps Pipeline: Model versioning, monitoring, and CI/CD
 
-## Arquitetura
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -82,7 +82,6 @@ python scripts/load_sample_data.py
 ## Usage
 
 ### 1. Model Training
-
 ```bash
 python -m neuropredict.train --config configs/training_config.yaml
 
@@ -90,14 +89,13 @@ python -m neuropredict.train --config configs/training_config.yaml --hpo
 ```
 
 ### 2. API REST
-
 ```bash
 uvicorn neuropredict.api.main:app --reload --host 0.0.0.0 --port 8000
 
 # http://localhost:8000/docs
 ```
 
-### 3. Predição
+### 3. Prediction
 <img width="954" height="668" alt="image" src="https://github.com/user-attachments/assets/45a0b3e7-9a8a-4fe3-b117-5badfa8041bd" />
 
 ### 4. Web Dashboard
@@ -121,7 +119,7 @@ Contributions are welcome:
 ## Important Notes
 This system is for research and educational purposes only. It must not be used as a substitute for professional medical advice, diagnosis, or treatment. Always seek the advice of your physician or other qualified healthcare professional.
 
-## Citação
+## Quote
 If you use this project in your research, cite:
 
 ```bibtex
