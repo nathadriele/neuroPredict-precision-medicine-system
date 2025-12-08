@@ -1,15 +1,13 @@
-# NeuroPredict: Sistema de Medicina de Precisão para Epilepsia Refratária
+# NeuroPredict: Precision Medicine System for Refractory Epilepsy
 
 <img width="1462" height="557" alt="Captura de tela de 2025-12-02 11-47-23" src="https://github.com/user-attachments/assets/7feafd7a-07b0-4a47-9d19-4e35022f1d03" />
 
-
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-## Visão Geral
+## Overview
+NeuroPredict is an AI-driven precision medicine system that integrates clinical, genomic, EEG, neuroimaging, and medical literature data to predict individual treatment response in refractory epilepsy. The platform combines knowledge graphs, deep learning models, and large language models (LLMs) to provide evidence-based, personalized therapeutic recommendations.
 
-NeuroPredict é um sistema básico de medicina de precisão baseado em IA que integra dados clínicos, genômicos, de neuroimagem e literatura médica para predizer resposta individual a tratamentos em epilepsia refratária. O sistema utiliza grafos de conhecimento, modelos de deep learning e LLMs para fornecer recomendações terapêuticas personalizadas.
-
-## Características Principais
+## Key Features
 
 - **Análise Multimodal**: Integração de dados clínicos, genômicos, EEG e neuroimagem
 - **Grafo de Conhecimento Médico**: Representação semântica de relações entre genes, drogas, sintomas e fenótipos
