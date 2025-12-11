@@ -411,31 +411,14 @@ def _prepare_features(patient: PatientData) -> np.ndarray:
     return np.array(features).reshape(1, -1)
 
 
-def _calculate_confidence(probabilities: np.ndarray) -> float:
-    """
-    Calcula confiança da predição.
-    
-    Args:
-        probabilities: Array de probabilidades
-        
-    Returns:
-        Score de confiança
-    """
-    # Usa entropia normalizada como proxy de confiança
-    # Menor entropia = maior confiança
-    
+def _calculate_confidence(probabilities: np.ndarray) -> float:    
     entropy = -np.sum(probabilities * np.log(probabilities + 1e-10))
     max_entropy = -np.log(1 / len(probabilities))
     
-    # Normaliza entre 0 e 1 (inverte para que maior seja melhor)
     confidence = 1 - (entropy / max_entropy)
     
     return float(confidence)
 
-
-# ============================================================================
-# Exception Handlers
-# ============================================================================
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Any, exc: HTTPException) -> JSONResponse:
