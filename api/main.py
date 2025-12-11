@@ -19,9 +19,6 @@ from neuropredict.knowledge_graph.graph import Neo4jKnowledgeGraph
 from neuropredict.models.ensemble import EnsembleModel
 from neuropredict.rag.system import EpilepsyRAGSystem, MedicalVectorStore
 
-# ============================================================================
-# Configuração
-# ============================================================================
 
 settings = get_settings()
 
@@ -33,7 +30,6 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.api.cors_origins,
@@ -42,9 +38,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============================================================================
-# Schemas Pydantic
-# ============================================================================
 
 class GeneticVariant(BaseModel):
     """Variante genética."""
@@ -172,10 +165,6 @@ class HealthCheckResponse(BaseModel):
     services: Dict[str, str]
 
 
-# ============================================================================
-# Gerenciamento de Estado
-# ============================================================================
-
 class AppState:
     """Estado global da aplicação."""
     
@@ -196,7 +185,6 @@ async def startup_event() -> None:
     logger.info("Iniciando NeuroPredict API...")
     
     try:
-        # Carrega modelo ensemble
         model_path = Path("models/ensemble_model_v1.pkl")
         if model_path.exists():
             state.ensemble_model = EnsembleModel.load(model_path)
@@ -204,14 +192,12 @@ async def startup_event() -> None:
         else:
             logger.warning(f"Modelo não encontrado em {model_path}")
         
-        # Inicializa vector store
         state.vector_store = MedicalVectorStore(
             persist_directory=settings.llm.chroma_persist_directory,
             embedding_model=settings.llm.embedding_model,
         )
         logger.info("Vector store inicializado")
         
-        # Inicializa sistema RAG
         state.rag_system = EpilepsyRAGSystem(
             vector_store=state.vector_store,
             llm_provider=settings.llm.provider,
@@ -220,7 +206,6 @@ async def startup_event() -> None:
         )
         logger.info("Sistema RAG inicializado")
         
-        # Inicializa grafo de conhecimento
         state.knowledge_graph = Neo4jKnowledgeGraph(
             uri=settings.neo4j.uri,
             user=settings.neo4j.user,
@@ -246,10 +231,6 @@ async def shutdown_event() -> None:
         logger.info("Conexão com Neo4j encerrada")
 
 
-# ============================================================================
-# Endpoints
-# ============================================================================
-
 @app.get("/", response_model=HealthCheckResponse)
 async def root() -> HealthCheckResponse:
     """Health check endpoint."""
@@ -273,15 +254,6 @@ async def root() -> HealthCheckResponse:
     status_code=status.HTTP_200_OK,
 )
 async def predict_treatment(request: PredictionRequest) -> PredictionResponse:
-    """
-    Prediz melhor tratamento para o paciente.
-    
-    Args:
-        request: Dados do paciente
-        
-    Returns:
-        Predição com probabilidades e explicações
-    """
     if state.ensemble_model is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -289,14 +261,11 @@ async def predict_treatment(request: PredictionRequest) -> PredictionResponse:
         )
     
     try:
-        # Prepara features
         features = _prepare_features(request.patient)
         
-        # Faz predição
         prediction = state.ensemble_model.predict(features)
         probabilities = state.ensemble_model.predict_proba(features)
         
-        # Mapeia classes para tratamentos
         treatment_map = {
             0: "levetiracetam",
             1: "lamotrigine",
@@ -306,7 +275,6 @@ async def predict_treatment(request: PredictionRequest) -> PredictionResponse:
         predicted_treatment = treatment_map[int(prediction[0])]
         response_probability = float(np.max(probabilities[0]))
         
-        # Tratamentos alternativos
         sorted_indices = np.argsort(probabilities[0])[::-1]
         alternative_treatments = [
             {
@@ -316,10 +284,8 @@ async def predict_treatment(request: PredictionRequest) -> PredictionResponse:
             for idx in sorted_indices[1:3]
         ]
         
-        # Explicações SHAP (se solicitado)
         explanation = None
         if request.explain:
-            # Implementar SHAP explanation
             explanation = {
                 "feature_importance": {},
                 "force_plot_data": {},
@@ -349,15 +315,6 @@ async def predict_treatment(request: PredictionRequest) -> PredictionResponse:
     status_code=status.HTTP_200_OK,
 )
 async def rag_recommendation(request: RAGRequest) -> RAGResponse:
-    """
-    Gera recomendação usando RAG.
-    
-    Args:
-        request: Dados do paciente e pergunta
-        
-    Returns:
-        Recomendação baseada em literatura
-    """
     if state.rag_system is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -365,21 +322,18 @@ async def rag_recommendation(request: RAGRequest) -> RAGResponse:
         )
     
     try:
-        # Prepara dados do paciente
         patient_data = request.patient.model_dump()
         
-        # Gera recomendação
         recommendation = state.rag_system.generate_recommendation(
             patient_data=patient_data,
             question=request.question,
             top_k=request.top_k,
         )
         
-        # Formata sources
         sources = [
             {
                 "id": source.id,
-                "content": source.content[:500],  # Trunca para API
+                "content": source.content[:500],
                 "metadata": source.metadata,
             }
             for source in recommendation.sources
@@ -409,15 +363,6 @@ async def rag_recommendation(request: RAGRequest) -> RAGResponse:
 async def find_similar_patients(
     request: SimilarPatientsRequest,
 ) -> SimilarPatientsResponse:
-    """
-    Encontra pacientes similares no grafo de conhecimento.
-    
-    Args:
-        request: ID do paciente e top K
-        
-    Returns:
-        Lista de pacientes similares
-    """
     if state.knowledge_graph is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -450,11 +395,6 @@ async def find_similar_patients(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro: {str(e)}",
         )
-
-
-# ============================================================================
-# Funções Auxiliares
-# ============================================================================
 
 def _prepare_features(patient: PatientData) -> np.ndarray:
     """
