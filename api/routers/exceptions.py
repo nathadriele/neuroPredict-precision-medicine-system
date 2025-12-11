@@ -10,10 +10,6 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 
-# ============================================================================
-# Exceções Customizadas
-# ============================================================================
-
 class NeuroPredictException(Exception):
     """Exceção base do NeuroPredict."""
     
@@ -106,24 +102,10 @@ class RateLimitExceeded(NeuroPredictException):
         )
 
 
-# ============================================================================
-# Exception Handlers
-# ============================================================================
-
 async def neuropredict_exception_handler(
     request: Request,
     exc: NeuroPredictException,
 ) -> JSONResponse:
-    """
-    Handler para exceções customizadas do NeuroPredict.
-    
-    Args:
-        request: Request
-        exc: Exceção
-        
-    Returns:
-        JSONResponse com erro
-    """
     logger.error(
         f"NeuroPredictException: {exc.message}",
         extra={
@@ -148,16 +130,6 @@ async def http_exception_handler(
     request: Request,
     exc: HTTPException,
 ) -> JSONResponse:
-    """
-    Handler para HTTPException do FastAPI.
-    
-    Args:
-        request: Request
-        exc: Exceção HTTP
-        
-    Returns:
-        JSONResponse com erro
-    """
     logger.warning(
         f"HTTPException: {exc.detail}",
         extra={
@@ -180,16 +152,6 @@ async def general_exception_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
-    """
-    Handler para exceções gerais não tratadas.
-    
-    Args:
-        request: Request
-        exc: Exceção
-        
-    Returns:
-        JSONResponse com erro
-    """
     logger.exception(
         "Exceção não tratada",
         extra={
@@ -198,14 +160,13 @@ async def general_exception_handler(
         },
     )
     
-    # Em produção, não expor detalhes internos
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "Erro interno do servidor",
             "timestamp": datetime.now().isoformat(),
             "path": str(request.url.path),
-            # "details": str(exc),  # Descomentar apenas em desenvolvimento
+            # "details": str(exc),
         },
     )
 
@@ -214,16 +175,6 @@ async def validation_exception_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
-    """
-    Handler para erros de validação do Pydantic.
-    
-    Args:
-        request: Request
-        exc: Exceção de validação
-        
-    Returns:
-        JSONResponse com erros de validação
-    """
     from fastapi.exceptions import RequestValidationError
     
     if isinstance(exc, RequestValidationError):
@@ -256,17 +207,7 @@ async def validation_exception_handler(
     return await general_exception_handler(request, exc)
 
 
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
 def register_exception_handlers(app) -> None:
-    """
-    Registra todos os exception handlers na aplicação FastAPI.
-    
-    Args:
-        app: Aplicação FastAPI
-    """
     from fastapi.exceptions import RequestValidationError
     
     app.add_exception_handler(NeuroPredictException, neuropredict_exception_handler)
