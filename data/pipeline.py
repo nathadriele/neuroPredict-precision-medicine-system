@@ -17,10 +17,7 @@ from loguru import logger
 from pandera.typing import DataFrame, Series
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-
-# ============================================================================
-# Schemas de Validação com Pandera
-# ============================================================================
+============================================================================
 
 class ClinicalDataSchema(pa.DataFrameModel):
     """Schema para dados clínicos."""
@@ -68,10 +65,6 @@ class GeneticDataSchema(pa.DataFrameModel):
         strict = False
 
 
-# ============================================================================
-# Classes Base
-# ============================================================================
-
 @dataclass
 class ProcessingResult:
     """Resultado do processamento de dados."""
@@ -88,12 +81,6 @@ class DataProcessor(ABC):
     """Classe base abstrata para processadores de dados."""
     
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Inicializa o processador.
-        
-        Args:
-            config: Configurações específicas do processador
-        """
         self.config = config or {}
         self.logger = logger.bind(processor=self.__class__.__name__)
     
@@ -113,29 +100,17 @@ class DataProcessor(ABC):
         pass
     
     def process(self, source: Any) -> ProcessingResult:
-        """
-        Processa dados: carrega, valida e transforma.
-        
-        Args:
-            source: Fonte de dados
-            
-        Returns:
-            ProcessingResult com dados processados e metadados
-        """
         import time
         
         start_time = time.time()
         
-        # Carrega
         self.logger.info("Carregando dados...")
         data = self.load(source)
         n_input = len(data)
         
-        # Valida
         self.logger.info("Validando dados...")
         data, errors = self.validate(data)
         
-        # Transforma
         self.logger.info("Transformando dados...")
         data = self.transform(data)
         
@@ -161,10 +136,6 @@ class DataProcessor(ABC):
         return result
 
 
-# ============================================================================
-# Processadores Específicos
-# ============================================================================
-
 class ClinicalDataProcessor(DataProcessor):
     """Processador para dados clínicos."""
     
@@ -173,7 +144,6 @@ class ClinicalDataProcessor(DataProcessor):
         if isinstance(source, Path):
             return pd.read_csv(source)
         elif isinstance(source, str) and source.startswith("postgresql://"):
-            # Carrega do banco
             from sqlalchemy import create_engine
             engine = create_engine(source)
             return pd.read_sql("SELECT * FROM clinical_data", engine)
@@ -188,13 +158,11 @@ class ClinicalDataProcessor(DataProcessor):
             validated_data = ClinicalDataSchema.validate(data, lazy=True)
             return validated_data, errors
         except pa.errors.SchemaErrors as e:
-            # Coleta todos os erros
             for failure in e.failure_cases.itertuples():
                 errors.append(
                     f"Linha {failure.index}: {failure.column} - {failure.check}"
                 )
             
-            # Remove linhas inválidas
             invalid_indices = e.failure_cases["index"].unique()
             cleaned_data = data.drop(invalid_indices)
             
@@ -208,17 +176,14 @@ class ClinicalDataProcessor(DataProcessor):
         """Transforma dados clínicos."""
         df = data.copy()
         
-        # Calcula features derivadas
         df["years_since_onset"] = df["age"] - df["age_at_onset"]
         df["seizure_burden"] = (
             df["seizure_frequency_per_month"] * df["epilepsy_duration_years"] * 12
         )
         
-        # Processa lista de tratamentos anteriores
         df["n_previous_treatments"] = df["previous_treatments"].str.split(";").str.len()
         df["has_previous_treatment"] = df["n_previous_treatments"] > 0
         
-        # Encoding de variáveis categóricas
         label_encoders = {}
         cat_columns = ["sex", "seizure_type", "treatment_response"]
         
@@ -227,7 +192,6 @@ class ClinicalDataProcessor(DataProcessor):
             df[f"{col}_encoded"] = le.fit_transform(df[col])
             label_encoders[col] = le
         
-        # Normalização de features numéricas
         numeric_cols = [
             "age",
             "seizure_frequency_per_month",
@@ -240,7 +204,6 @@ class ClinicalDataProcessor(DataProcessor):
             df[numeric_cols]
         )
         
-        # Armazena encoders e scalers para uso posterior
         df.attrs["encoders"] = label_encoders
         df.attrs["scaler"] = scaler
         
@@ -263,8 +226,6 @@ class GeneticDataProcessor(DataProcessor):
         """Carrega arquivo VCF."""
         from Bio import SeqIO
         
-        # Implementação simplificada
-        # Na prática, use bibliotecas como cyvcf2 ou pysam
         records = []
         
         with open(vcf_path) as f:
@@ -305,7 +266,6 @@ class GeneticDataProcessor(DataProcessor):
         """Transforma dados genômicos."""
         df = data.copy()
         
-        # Agrupa variantes por paciente
         patient_variants = (
             df.groupby("patient_id")
             .agg({
@@ -316,11 +276,9 @@ class GeneticDataProcessor(DataProcessor):
             .reset_index()
         )
         
-        # Cria features de contagem
         patient_variants["n_genes_affected"] = patient_variants["gene"].str.len()
         patient_variants["n_variants"] = patient_variants["variant"].str.len()
         
-        # Identifica genes de epilepsia conhecidos
         epilepsy_genes = {
             "SCN1A", "SCN2A", "SCN8A", "KCNQ2", "KCNQ3",
             "GABRA1", "GABRG2", "STXBP1", "PCDH19", "CDKL5",
@@ -354,7 +312,6 @@ class NeuroimagingProcessor(DataProcessor):
         img = nib.load(str(nifti_path))
         data = img.get_fdata()
         
-        # Extrai features estatísticas básicas
         features = {
             "patient_id": nifti_path.stem,
             "shape": data.shape,
@@ -384,7 +341,6 @@ class NeuroimagingProcessor(DataProcessor):
         """Valida dados de neuroimagem."""
         errors = []
         
-        # Validações básicas
         if "patient_id" not in data.columns:
             errors.append("Coluna patient_id ausente")
         
@@ -398,7 +354,6 @@ class NeuroimagingProcessor(DataProcessor):
         """Transforma dados de neuroimagem."""
         df = data.copy()
         
-        # Normaliza intensidades
         if "mean_intensity" in df.columns:
             scaler = StandardScaler()
             df["mean_intensity_scaled"] = scaler.fit_transform(
@@ -407,10 +362,6 @@ class NeuroimagingProcessor(DataProcessor):
         
         return df
 
-
-# ============================================================================
-# Pipeline Integrado
-# ============================================================================
 
 class IntegratedDataPipeline:
     """Pipeline integrado para todos os tipos de dados."""
@@ -428,15 +379,6 @@ class IntegratedDataPipeline:
         self,
         sources: Dict[str, Any],
     ) -> Dict[str, ProcessingResult]:
-        """
-        Processa todos os tipos de dados.
-        
-        Args:
-            sources: Dicionário com fontes de dados por tipo
-            
-        Returns:
-            Dicionário com resultados por tipo
-        """
         results = {}
         
         for data_type, source in sources.items():
@@ -453,19 +395,8 @@ class IntegratedDataPipeline:
         self,
         results: Dict[str, ProcessingResult],
     ) -> pd.DataFrame:
-        """
-        Merge de dados processados.
-        
-        Args:
-            results: Resultados do processamento
-            
-        Returns:
-            DataFrame integrado
-        """
-        # Começa com dados clínicos como base
         merged = results["clinical"].data.copy()
         
-        # Faz merge com dados genéticos
         if "genetic" in results:
             genetic_df = results["genetic"].data
             merged = merged.merge(
@@ -475,7 +406,6 @@ class IntegratedDataPipeline:
                 suffixes=("", "_genetic"),
             )
         
-        # Faz merge com neuroimagem
         if "neuroimaging" in results:
             neuro_df = results["neuroimaging"].data
             merged = merged.merge(
