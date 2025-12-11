@@ -13,9 +13,6 @@ env:
   POETRY_VERSION: '1.7.0'
 
 jobs:
-  # ============================================================================
-  # Linting e Formatação
-  # ============================================================================
   lint:
     name: Code Quality Checks
     runs-on: ubuntu-latest
@@ -54,9 +51,6 @@ jobs:
       - name: Run MyPy
         run: mypy src/ --ignore-missing-imports
 
-  # ============================================================================
-  # Testes Unitários
-  # ============================================================================
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -145,9 +139,6 @@ jobs:
           flags: unittests
           name: codecov-umbrella
 
-  # ============================================================================
-  # Testes de Integração
-  # ============================================================================
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
@@ -180,9 +171,6 @@ jobs:
         if: always()
         run: docker-compose down -v
 
-  # ============================================================================
-  # Build Docker Images
-  # ============================================================================
   build:
     name: Build Docker Images
     runs-on: ubuntu-latest
@@ -225,9 +213,6 @@ jobs:
           cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/neuropredict-api:buildcache
           cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/neuropredict-api:buildcache,mode=max
 
-  # ============================================================================
-  # Security Scanning
-  # ============================================================================
   security:
     name: Security Scan
     runs-on: ubuntu-latest
@@ -262,9 +247,6 @@ jobs:
           name: bandit-report
           path: bandit-report.json
 
-  # ============================================================================
-  # Deploy to Staging
-  # ============================================================================
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
@@ -299,9 +281,6 @@ jobs:
             --cluster neuropredict-staging \
             --services neuropredict-api
 
-  # ============================================================================
-  # Deploy to Production
-  # ============================================================================
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
@@ -343,9 +322,6 @@ jobs:
           webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         if: always()
 
-  # ============================================================================
-  # Performance Tests
-  # ============================================================================
   performance:
     name: Performance Tests
     runs-on: ubuntu-latest
@@ -373,9 +349,6 @@ jobs:
           name: performance-report
           path: performance-report.html
 
-  # ============================================================================
-  # Documentation
-  # ============================================================================
   docs:
     name: Build Documentation
     runs-on: ubuntu-latest
