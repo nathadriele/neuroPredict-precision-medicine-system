@@ -15,12 +15,10 @@ from neuropredict.models.predictor import TreatmentPredictor
 
 router = APIRouter(prefix="/predict", tags=["prediction"])
 
-# Estado global (simplificado, em produção use dependency injection)
 _predictor: Optional[TreatmentPredictor] = None
 
 
 def get_predictor() -> TreatmentPredictor:
-    """Retorna predictor singleton."""
     global _predictor
     if _predictor is None:
         model_path = Path("models/ensemble_model_v1.pkl")
@@ -34,16 +32,13 @@ def get_predictor() -> TreatmentPredictor:
     return _predictor
 
 
-# Schemas
 class GeneticVariant(BaseModel):
-    """Variante genética."""
     gene: str
     variant: str
     variant_type: str
 
 
 class PatientData(BaseModel):
-    """Dados do paciente."""
     patient_id: str
     age: int = Field(..., ge=0, le=120)
     sex: str
@@ -58,19 +53,16 @@ class PatientData(BaseModel):
 
 
 class PredictionRequest(BaseModel):
-    """Request de predição."""
     patient: PatientData
     explain: bool = Field(default=True, description="Incluir explicações")
 
 
 class AlternativeTreatment(BaseModel):
-    """Tratamento alternativo."""
     treatment: str
     probability: float
 
 
 class PredictionResponse(BaseModel):
-    """Response de predição."""
     patient_id: str
     predicted_treatment: str
     response_probability: float
@@ -82,43 +74,28 @@ class PredictionResponse(BaseModel):
 
 
 class BatchPredictionRequest(BaseModel):
-    """Request de predição em batch."""
     patients: List[PatientData]
     explain: bool = False
 
 
 class BatchPredictionResponse(BaseModel):
-    """Response de predição em batch."""
     predictions: List[PredictionResponse]
     total: int
     timestamp: datetime
 
 
-# Endpoints
 @router.post("/", response_model=PredictionResponse)
 async def predict_treatment(request: PredictionRequest) -> PredictionResponse:
-    """
-    Prediz tratamento recomendado para paciente.
-    
-    Args:
-        request: Dados do paciente
-        
-    Returns:
-        Predição com probabilidades e explicações
-    """
     try:
         predictor = get_predictor()
         
-        # Prepara dados
         patient_dict = request.patient.model_dump()
         
-        # Predição
         if request.explain:
             result = predictor.predict_with_explanation(patient_dict)
         else:
             result = predictor.predict(patient_dict)
         
-        # Formata alternativas
         alternatives = [
             AlternativeTreatment(
                 treatment=alt["treatment"],
@@ -148,15 +125,6 @@ async def predict_treatment(request: PredictionRequest) -> PredictionResponse:
 
 @router.post("/batch", response_model=BatchPredictionResponse)
 async def predict_batch(request: BatchPredictionRequest) -> BatchPredictionResponse:
-    """
-    Predição em batch para múltiplos pacientes.
-    
-    Args:
-        request: Lista de pacientes
-        
-    Returns:
-        Lista de predições
-    """
     try:
         predictor = get_predictor()
         
@@ -202,12 +170,6 @@ async def predict_batch(request: BatchPredictionRequest) -> BatchPredictionRespo
 
 @router.get("/info")
 async def model_info() -> Dict[str, Any]:
-    """
-    Retorna informações sobre o modelo carregado.
-    
-    Returns:
-        Informações do modelo
-    """
     try:
         predictor = get_predictor()
         info = predictor.get_model_info()
