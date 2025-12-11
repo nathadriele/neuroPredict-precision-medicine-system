@@ -396,19 +396,7 @@ async def find_similar_patients(
             detail=f"Erro: {str(e)}",
         )
 
-def _prepare_features(patient: PatientData) -> np.ndarray:
-    """
-    Prepara features para o modelo.
-    
-    Args:
-        patient: Dados do paciente
-        
-    Returns:
-        Array de features
-    """
-    # Implementação simplificada
-    # Na prática, deve seguir o mesmo pipeline de feature engineering do treinamento
-    
+def _prepare_features(patient: PatientData) -> np.ndarray:    
     features = [
         patient.age,
         patient.seizure_frequency_per_month,
@@ -418,8 +406,7 @@ def _prepare_features(patient: PatientData) -> np.ndarray:
         len(patient.genetic_variants),
     ]
     
-    # Adiciona features dummy para completar
-    features.extend([0.0] * 20)  # Preenche até ter features suficientes
+    features.extend([0.0] * 20)
     
     return np.array(features).reshape(1, -1)
 
