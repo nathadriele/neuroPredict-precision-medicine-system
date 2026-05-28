@@ -1,24 +1,18 @@
-"""
-Ensemble de modelos para predição de resposta a tratamento.
-Integra XGBoost, LightGBM, CatBoost e Redes Neurais.
-"""
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import catboost as cb
 import joblib
 import lightgbm as lgb
 import numpy as np
 import optuna
-import pandas as pd
-import shap
 import torch
 import torch.nn as nn
 import xgboost as xgb
 from loguru import logger
+from scipy import stats
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.metrics import (
     accuracy_score,
@@ -27,26 +21,18 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
 
-# ============================================================================
-# Métricas e Avaliação
-# ============================================================================
-
 @dataclass
 class ModelMetrics:
-    """Métricas de avaliação de modelo."""
-    
     accuracy: float
     precision: float
     recall: float
     f1_score: float
     roc_auc: float
-    
+
     def to_dict(self) -> Dict[str, float]:
-        """Converte para dicionário."""
         return {
             "accuracy": self.accuracy,
             "precision": self.precision,
@@ -54,9 +40,8 @@ class ModelMetrics:
             "f1_score": self.f1_score,
             "roc_auc": self.roc_auc,
         }
-    
+
     def __repr__(self) -> str:
-        """String representation."""
         return (
             f"Accuracy: {self.accuracy:.4f}, "
             f"Precision: {self.precision:.4f}, "
@@ -71,47 +56,35 @@ def compute_metrics(
     y_pred: np.ndarray,
     y_proba: Optional[np.ndarray] = None,
 ) -> ModelMetrics:
-    """
-    Computa métricas de classificação.
-    
-    Args:
-        y_true: Labels verdadeiros
-        y_pred: Predições
-        y_proba: Probabilidades (para ROC-AUC)
-        
-    Returns:
-        ModelMetrics
-    """
-    metrics = ModelMetrics(
+    roc_auc = 0.0
+
+    if y_proba is not None:
+        try:
+            roc_auc = roc_auc_score(
+                y_true,
+                y_proba,
+                multi_class="ovr",
+                average="weighted",
+            )
+        except ValueError:
+            roc_auc = 0.0
+
+    return ModelMetrics(
         accuracy=accuracy_score(y_true, y_pred),
         precision=precision_score(y_true, y_pred, average="weighted", zero_division=0),
         recall=recall_score(y_true, y_pred, average="weighted", zero_division=0),
         f1_score=f1_score(y_true, y_pred, average="weighted", zero_division=0),
-        roc_auc=roc_auc_score(
-            y_true,
-            y_proba if y_proba is not None else y_pred,
-            multi_class="ovr",
-            average="weighted",
-        ) if y_proba is not None else 0.0,
+        roc_auc=roc_auc,
     )
-    
-    return metrics
 
-
-# ============================================================================
-# Interface Base
-# ============================================================================
 
 class BaseModel(ABC):
-    """Interface base para modelos."""
-    
     def __init__(self, **kwargs: Any) -> None:
-        """Inicializa modelo."""
         self.model: Any = None
         self.is_fitted = False
         self.feature_importance_: Optional[np.ndarray] = None
         self.logger = logger.bind(model=self.__class__.__name__)
-    
+
     @abstractmethod
     def fit(
         self,
@@ -120,50 +93,36 @@ class BaseModel(ABC):
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
     ) -> "BaseModel":
-        """Treina modelo."""
         pass
-    
+
     @abstractmethod
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Faz predições."""
         pass
-    
+
     @abstractmethod
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Retorna probabilidades."""
         pass
-    
-    def evaluate(
-        self,
-        X: np.ndarray,
-        y: np.ndarray,
-    ) -> ModelMetrics:
-        """Avalia modelo."""
-        y_pred = self.predict(X)
-        y_proba = self.predict_proba(X)
-        
-        return compute_metrics(y, y_pred, y_proba)
-    
+
+    def evaluate(self, X: np.ndarray, y: np.ndarray) -> ModelMetrics:
+        return compute_metrics(
+            y_true=y,
+            y_pred=self.predict(X),
+            y_proba=self.predict_proba(X),
+        )
+
     def save(self, path: Path) -> None:
-        """Salva modelo."""
+        path.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump(self, path)
-        self.logger.info(f"Modelo salvo em {path}")
-    
+        self.logger.info(f"Model saved to {path}")
+
     @classmethod
     def load(cls, path: Path) -> "BaseModel":
-        """Carrega modelo."""
         model = joblib.load(path)
-        logger.info(f"Modelo carregado de {path}")
+        logger.info(f"Model loaded from {path}")
         return model
 
 
-# ============================================================================
-# Modelos Específicos
-# ============================================================================
-
 class XGBoostModel(BaseModel):
-    """Wrapper para XGBoost."""
-    
     def __init__(
         self,
         n_estimators: int = 100,
@@ -171,21 +130,20 @@ class XGBoostModel(BaseModel):
         learning_rate: float = 0.1,
         **kwargs: Any,
     ) -> None:
-        """Inicializa XGBoost."""
         super().__init__()
-        
+
         self.params = {
             "n_estimators": n_estimators,
             "max_depth": max_depth,
             "learning_rate": learning_rate,
             "objective": "multi:softprob",
             "tree_method": "hist",
-            "enable_categorical": True,
+            "eval_metric": "mlogloss",
             **kwargs,
         }
-        
+
         self.model = xgb.XGBClassifier(**self.params)
-    
+
     def fit(
         self,
         X: np.ndarray,
@@ -193,35 +151,26 @@ class XGBoostModel(BaseModel):
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
     ) -> "XGBoostModel":
-        """Treina XGBoost."""
         eval_set = [(X, y)]
+
         if X_val is not None and y_val is not None:
             eval_set.append((X_val, y_val))
-        
-        self.model.fit(
-            X,
-            y,
-            eval_set=eval_set,
-            verbose=False,
-        )
-        
+
+        self.model.fit(X, y, eval_set=eval_set, verbose=False)
+
         self.is_fitted = True
         self.feature_importance_ = self.model.feature_importances_
-        
+
         return self
-    
+
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predições."""
         return self.model.predict(X)
-    
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Probabilidades."""
         return self.model.predict_proba(X)
 
 
 class LightGBMModel(BaseModel):
-    """Wrapper para LightGBM."""
-    
     def __init__(
         self,
         n_estimators: int = 100,
@@ -229,9 +178,8 @@ class LightGBMModel(BaseModel):
         learning_rate: float = 0.1,
         **kwargs: Any,
     ) -> None:
-        """Inicializa LightGBM."""
         super().__init__()
-        
+
         self.params = {
             "n_estimators": n_estimators,
             "max_depth": max_depth,
@@ -240,9 +188,9 @@ class LightGBMModel(BaseModel):
             "verbosity": -1,
             **kwargs,
         }
-        
+
         self.model = lgb.LGBMClassifier(**self.params)
-    
+
     def fit(
         self,
         X: np.ndarray,
@@ -250,33 +198,34 @@ class LightGBMModel(BaseModel):
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
     ) -> "LightGBMModel":
-        """Treina LightGBM."""
-        callbacks = [lgb.early_stopping(10), lgb.log_evaluation(0)]
-        
+        callbacks = [lgb.log_evaluation(0)]
+
+        if X_val is not None and y_val is not None:
+            callbacks.append(lgb.early_stopping(10))
+            eval_set = [(X_val, y_val)]
+        else:
+            eval_set = None
+
         self.model.fit(
             X,
             y,
-            eval_set=[(X_val, y_val)] if X_val is not None else None,
+            eval_set=eval_set,
             callbacks=callbacks,
         )
-        
+
         self.is_fitted = True
         self.feature_importance_ = self.model.feature_importances_
-        
+
         return self
-    
+
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predições."""
         return self.model.predict(X)
-    
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Probabilidades."""
         return self.model.predict_proba(X)
 
 
 class CatBoostModel(BaseModel):
-    """Wrapper para CatBoost."""
-    
     def __init__(
         self,
         iterations: int = 100,
@@ -284,9 +233,8 @@ class CatBoostModel(BaseModel):
         learning_rate: float = 0.1,
         **kwargs: Any,
     ) -> None:
-        """Inicializa CatBoost."""
         super().__init__()
-        
+
         self.params = {
             "iterations": iterations,
             "depth": depth,
@@ -295,9 +243,9 @@ class CatBoostModel(BaseModel):
             "verbose": False,
             **kwargs,
         }
-        
+
         self.model = cb.CatBoostClassifier(**self.params)
-    
+
     def fit(
         self,
         X: np.ndarray,
@@ -305,77 +253,74 @@ class CatBoostModel(BaseModel):
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
     ) -> "CatBoostModel":
-        """Treina CatBoost."""
         eval_set = None
+
         if X_val is not None and y_val is not None:
             eval_set = cb.Pool(X_val, y_val)
-        
+
         self.model.fit(
             X,
             y,
             eval_set=eval_set,
-            early_stopping_rounds=10,
+            early_stopping_rounds=10 if eval_set is not None else None,
         )
-        
+
         self.is_fitted = True
         self.feature_importance_ = self.model.feature_importances_
-        
+
         return self
-    
+
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predições."""
         return self.model.predict(X).flatten()
-    
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Probabilidades."""
         return self.model.predict_proba(X)
 
 
 class NeuralNetModel(BaseModel):
-    """Rede Neural Feedforward."""
-    
     def __init__(
         self,
         input_dim: int,
-        hidden_dims: List[int] = [256, 128, 64],
+        hidden_dims: Optional[List[int]] = None,
         n_classes: int = 3,
         dropout: float = 0.3,
         learning_rate: float = 0.001,
         batch_size: int = 32,
         epochs: int = 100,
     ) -> None:
-        """Inicializa rede neural."""
         super().__init__()
-        
+
         self.input_dim = input_dim
-        self.hidden_dims = hidden_dims
+        self.hidden_dims = hidden_dims or [256, 128, 64]
         self.n_classes = n_classes
         self.dropout = dropout
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.epochs = epochs
-        
-        # Constrói arquitetura
-        layers = []
-        prev_dim = input_dim
-        
-        for hidden_dim in hidden_dims:
-            layers.extend([
-                nn.Linear(prev_dim, hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-            ])
-            prev_dim = hidden_dim
-        
-        layers.append(nn.Linear(prev_dim, n_classes))
-        
-        self.model = nn.Sequential(*layers)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
-        
         self.scaler = StandardScaler()
-    
+
+        self.model = self._build_model().to(self.device)
+
+    def _build_model(self) -> nn.Sequential:
+        layers: List[nn.Module] = []
+        previous_dim = self.input_dim
+
+        for hidden_dim in self.hidden_dims:
+            layers.extend(
+                [
+                    nn.Linear(previous_dim, hidden_dim),
+                    nn.BatchNorm1d(hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(self.dropout),
+                ]
+            )
+            previous_dim = hidden_dim
+
+        layers.append(nn.Linear(previous_dim, self.n_classes))
+
+        return nn.Sequential(*layers)
+
     def fit(
         self,
         X: np.ndarray,
@@ -383,119 +328,99 @@ class NeuralNetModel(BaseModel):
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
     ) -> "NeuralNetModel":
-        """Treina rede neural."""
-        # Normaliza features
         X_scaled = self.scaler.fit_transform(X)
-        
-        # Converte para tensores
+
         X_train = torch.FloatTensor(X_scaled).to(self.device)
         y_train = torch.LongTensor(y).to(self.device)
-        
-        # DataLoader
+
         dataset = torch.utils.data.TensorDataset(X_train, y_train)
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=self.batch_size,
             shuffle=True,
         )
-        
-        # Otimizador e loss
+
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
         criterion = nn.CrossEntropyLoss()
-        
-        # Treinamento
+
         self.model.train()
+
         best_loss = float("inf")
         patience = 10
         patience_counter = 0
-        
+
         for epoch in range(self.epochs):
             epoch_loss = 0.0
-            
+
             for batch_X, batch_y in loader:
                 optimizer.zero_grad()
-                
+
                 outputs = self.model(batch_X)
                 loss = criterion(outputs, batch_y)
-                
+
                 loss.backward()
                 optimizer.step()
-                
+
                 epoch_loss += loss.item()
-            
+
             avg_loss = epoch_loss / len(loader)
-            
-            # Early stopping
+
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 patience_counter = 0
             else:
                 patience_counter += 1
+
                 if patience_counter >= patience:
                     self.logger.info(f"Early stopping at epoch {epoch + 1}")
                     break
-            
+
             if (epoch + 1) % 10 == 0:
                 self.logger.info(
-                    f"Epoch {epoch + 1}/{self.epochs}, Loss: {avg_loss:.4f}"
+                    f"Epoch {epoch + 1}/{self.epochs}, loss: {avg_loss:.4f}"
                 )
-        
+
         self.is_fitted = True
+
         return self
-    
+
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predições."""
         self.model.eval()
-        
+
         X_scaled = self.scaler.transform(X)
         X_tensor = torch.FloatTensor(X_scaled).to(self.device)
-        
+
         with torch.no_grad():
             outputs = self.model(X_tensor)
             predictions = torch.argmax(outputs, dim=1)
-        
+
         return predictions.cpu().numpy()
-    
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Probabilidades."""
         self.model.eval()
-        
+
         X_scaled = self.scaler.transform(X)
         X_tensor = torch.FloatTensor(X_scaled).to(self.device)
-        
+
         with torch.no_grad():
             outputs = self.model(X_tensor)
-            probas = torch.softmax(outputs, dim=1)
-        
-        return probas.cpu().numpy()
+            probabilities = torch.softmax(outputs, dim=1)
 
+        return probabilities.cpu().numpy()
 
-# ============================================================================
-# Ensemble
-# ============================================================================
 
 class EnsembleModel(BaseEstimator, ClassifierMixin):
-    """Ensemble de múltiplos modelos."""
-    
     def __init__(
         self,
         models: Optional[List[BaseModel]] = None,
         method: str = "voting",
         weights: Optional[List[float]] = None,
     ) -> None:
-        """
-        Inicializa ensemble.
-        
-        Args:
-            models: Lista de modelos
-            method: Método de ensemble (voting, weighted_voting, stacking)
-            weights: Pesos para weighted voting
-        """
         self.models = models or []
         self.method = method
         self.weights = weights
         self.logger = logger.bind(component="EnsembleModel")
-    
+
     def fit(
         self,
         X: np.ndarray,
@@ -503,67 +428,60 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
     ) -> "EnsembleModel":
-        """Treina todos os modelos do ensemble."""
-        for i, model in enumerate(self.models):
-            self.logger.info(f"Treinando modelo {i + 1}/{len(self.models)}")
+        if not self.models:
+            raise ValueError("At least one model must be provided.")
+
+        for index, model in enumerate(self.models, start=1):
+            self.logger.info(f"Training model {index}/{len(self.models)}")
             model.fit(X, y, X_val, y_val)
-        
+
         return self
-    
+
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predições via ensemble."""
         if self.method == "voting":
             return self._voting_predict(X)
-        elif self.method == "weighted_voting":
+
+        if self.method == "weighted_voting":
             return self._weighted_voting_predict(X)
-        else:
-            raise ValueError(f"Método {self.method} não suportado")
-    
+
+        raise ValueError(f"Unsupported ensemble method: {self.method}")
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Probabilidades via ensemble."""
-        all_probas = np.array([model.predict_proba(X) for model in self.models])
-        
-        if self.method == "voting" or self.method == "weighted_voting":
-            if self.weights:
-                weights = np.array(self.weights).reshape(-1, 1, 1)
-                return np.average(all_probas, axis=0, weights=weights.squeeze())
-            else:
-                return np.mean(all_probas, axis=0)
-        
-        return np.mean(all_probas, axis=0)
-    
+        if not self.models:
+            raise ValueError("The ensemble has no models.")
+
+        all_probabilities = np.array([model.predict_proba(X) for model in self.models])
+
+        if self.method == "weighted_voting" and self.weights is not None:
+            weights = np.asarray(self.weights, dtype=float)
+
+            if len(weights) != len(self.models):
+                raise ValueError("The number of weights must match the number of models.")
+
+            return np.average(all_probabilities, axis=0, weights=weights)
+
+        return np.mean(all_probabilities, axis=0)
+
     def _voting_predict(self, X: np.ndarray) -> np.ndarray:
-        """Voting simples."""
         predictions = np.array([model.predict(X) for model in self.models])
-        
-        # Voto majoritário
-        from scipy import stats
         votes = stats.mode(predictions, axis=0, keepdims=False)
+
         return votes.mode
-    
+
     def _weighted_voting_predict(self, X: np.ndarray) -> np.ndarray:
-        """Voting ponderado."""
-        if not self.weights:
-            return self._voting_predict(X)
-        
-        probas = self.predict_proba(X)
-        return np.argmax(probas, axis=1)
-    
+        probabilities = self.predict_proba(X)
+
+        return np.argmax(probabilities, axis=1)
+
     def evaluate(self, X: np.ndarray, y: np.ndarray) -> ModelMetrics:
-        """Avalia ensemble."""
-        y_pred = self.predict(X)
-        y_proba = self.predict_proba(X)
-        
-        return compute_metrics(y, y_pred, y_proba)
+        return compute_metrics(
+            y_true=y,
+            y_pred=self.predict(X),
+            y_proba=self.predict_proba(X),
+        )
 
-
-# ============================================================================
-# Hyperparameter Optimization
-# ============================================================================
 
 class HyperparameterOptimizer:
-    """Otimização de hiperparâmetros com Optuna."""
-    
     def __init__(
         self,
         model_class: type,
@@ -574,7 +492,6 @@ class HyperparameterOptimizer:
         n_trials: int = 100,
         timeout: int = 3600,
     ) -> None:
-        """Inicializa otimizador."""
         self.model_class = model_class
         self.X_train = X_train
         self.y_train = y_train
@@ -583,49 +500,48 @@ class HyperparameterOptimizer:
         self.n_trials = n_trials
         self.timeout = timeout
         self.logger = logger.bind(component="HyperparameterOptimizer")
-    
+
     def objective(self, trial: optuna.Trial) -> float:
-        """Função objetivo para Optuna."""
-        # Define espaço de busca baseado no modelo
+        params = self._get_trial_params(trial)
+
+        model = self.model_class(**params)
+        model.fit(self.X_train, self.y_train, self.X_val, self.y_val)
+
+        metrics = model.evaluate(self.X_val, self.y_val)
+
+        return metrics.f1_score
+
+    def _get_trial_params(self, trial: optuna.Trial) -> Dict[str, Any]:
         if self.model_class == XGBoostModel:
-            params = {
+            return {
                 "n_estimators": trial.suggest_int("n_estimators", 50, 500),
                 "max_depth": trial.suggest_int("max_depth", 3, 10),
                 "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
                 "subsample": trial.suggest_float("subsample", 0.6, 1.0),
                 "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
             }
-        elif self.model_class == LightGBMModel:
-            params = {
+
+        if self.model_class == LightGBMModel:
+            return {
                 "n_estimators": trial.suggest_int("n_estimators", 50, 500),
                 "max_depth": trial.suggest_int("max_depth", 3, 10),
                 "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
                 "num_leaves": trial.suggest_int("num_leaves", 20, 150),
             }
-        else:
-            params = {}
-        
-        # Treina modelo
-        model = self.model_class(**params)
-        model.fit(self.X_train, self.y_train, self.X_val, self.y_val)
-        
-        # Avalia
-        metrics = model.evaluate(self.X_val, self.y_val)
-        
-        return metrics.f1_score
-    
+
+        return {}
+
     def optimize(self) -> Dict[str, Any]:
-        """Executa otimização."""
         study = optuna.create_study(direction="maximize")
-        
+
         study.optimize(
             self.objective,
             n_trials=self.n_trials,
             timeout=self.timeout,
             show_progress_bar=True,
         )
-        
-        self.logger.info(f"Melhor F1-Score: {study.best_value:.4f}")
-        self.logger.info(f"Melhores parâmetros: {study.best_params}")
-        
+
+        self.logger.info(f"Best F1-score: {study.best_value:.4f}")
+        self.logger.info(f"Best parameters: {study.best_params}")
+
         return study.best_params
